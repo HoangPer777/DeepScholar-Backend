@@ -97,20 +97,57 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 class SocialAuthSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    full_name = serializers.CharField(max_length=255)
-    provider_id = serializers.CharField(max_length=255)
+    full_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    provider_id = serializers.CharField(max_length=255, required=False, allow_blank=True)
     avatar_url = serializers.CharField(required=False, allow_blank=True)
     role = serializers.CharField(required=False, default="user")
 
     def save(self, provider):
         """
-        TODO: Get or create user from social auth provider
+        Get or create user from social auth provider
         1. Get/create user with email
         2. Update provider credentials
         3. Create Author profile if needed
         """
-        # TODO: Implementation
-        return None
+        email = self.validated_data.get('email')
+        full_name = self.validated_data.get('full_name', '')
+        provider_id = self.validated_data.get('provider_id', '')
+        avatar_url = self.validated_data.get('avatar_url', '')
+        role = self.validated_data.get('role', 'user')
+
+        user = User.objects.filter(email=email).first()
+        if not user:
+            # Create user
+            user_code = f"USR-{uuid.uuid4().hex[:8].upper()}"
+            # Give a random password since they login via social
+            user_password = uuid.uuid4().hex
+            user = User.objects.create_user(
+                email=email,
+                password=user_password,
+                full_name=full_name,
+                user_code=user_code,
+                provider=provider,
+                provider_id=provider_id,
+                avatar_url=avatar_url,
+                role=role
+            )
+            
+            if role == 'author':
+                author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
+                Author.objects.create(
+                    user=user,
+                    author_code=author_code,
+                    bio="",
+                    affiliation=""
+                )
+        else:
+            # Update provider info if needed
+            if user.provider == 'local':
+                 user.provider = provider
+                 user.provider_id = provider_id
+                 user.save()
+            
+        return user
 
 
 class NotificationSerializer(serializers.ModelSerializer):

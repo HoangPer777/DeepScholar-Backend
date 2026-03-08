@@ -12,6 +12,8 @@ from apps.users.views import (
     NotificationReadView,
     RegisterView,
     UserDetailView,
+    PasswordResetRequestView,
+    PasswordResetConfirmView,
 )
 
 urlpatterns = [
@@ -19,6 +21,8 @@ urlpatterns = [
     path("auth/login/", CustomTokenObtainPairView.as_view(), name="auth-login"),
     path("auth/google/", GoogleAuthView.as_view(), name="auth-google"),
     path("auth/facebook/", FacebookAuthView.as_view(), name="auth-facebook"),
+    path("auth/password-reset/", PasswordResetRequestView.as_view(), name="auth-password-reset"),
+    path("auth/password-reset-confirm/", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
     path("authors/ranking/", AuthorRankingView.as_view(), name="author-ranking"),

@@ -5,6 +5,9 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import F
 from django.shortcuts import get_object_or_404
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
 
 from apps.users.models import User, Author, Notification
 from apps.interactions.models import AuthorFollow
@@ -13,8 +16,12 @@ from apps.users.serializers import (
     CustomTokenObtainPairSerializer,
     UserSerializer,
     AuthorSerializer,
-    NotificationSerializer
+    NotificationSerializer,
+    SocialAuthSerializer
 )
+import requests
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 class RegisterView(APIView):
     """User registration with email/password"""
@@ -58,13 +65,114 @@ class BaseSocialAuthView(APIView):
 
 class GoogleAuthView(BaseSocialAuthView):
     """Handle Google OAuth login"""
-    pass
+    def post(self, request):
+        token = request.data.get('id_token')
+        role = request.data.get('role', 'user')
+        if not token:
+            return Response({"detail": "id_token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Note: For production, you must set audience to your Client ID
+            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), clock_skew_in_seconds=10)
+            serializer = SocialAuthSerializer(data={
+                'email': idinfo.get('email'),
+                'full_name': idinfo.get('name', ''),
+                'provider_id': idinfo.get('sub'),
+                'avatar_url': idinfo.get('picture', ''),
+                'role': role
+            })
+            if serializer.is_valid():
+                user = serializer.save(provider='google')
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                    'user': UserSerializer(user).data
+                }, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError as e:
+            return Response({"detail": f"Invalid Google token: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class FacebookAuthView(BaseSocialAuthView):
     """Handle Facebook OAuth login"""
-    pass
+    def post(self, request):
+        access_token = request.data.get('access_token')
+        role = request.data.get('role', 'user')
+        if not access_token:
+            return Response({"detail": "access_token is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            graph_url = f"https://graph.facebook.com/me?fields=id,name,email,picture&access_token={access_token}"
+            fb_res = requests.get(graph_url)
+            fb_data = fb_res.json()
+            
+            if 'error' in fb_data:
+                return Response({"detail": "Invalid Facebook token"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            serializer = SocialAuthSerializer(data={
+                'email': fb_data.get('email', f"{fb_data.get('id')}@facebook.com"),
+                'full_name': fb_data.get('name', ''),
+                'provider_id': fb_data.get('id'),
+                'avatar_url': fb_data.get('picture', {}).get('data', {}).get('url', ''),
+                'role': role
+            })
+            if serializer.is_valid():
+                user = serializer.save(provider='facebook')
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                    'user': UserSerializer(user).data
+                }, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+class PasswordResetRequestView(APIView):
+    """Request password reset link"""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({"detail": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        user = User.objects.filter(email=email).first()
+        if user:
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            # In a real app, send email here. For now, print to console.
+            reset_link = f"http://localhost:3000/reset-password?uid={uid}&token={token}"
+            print(f"PASSWORD RESET LINK: {reset_link}")
+            
+        return Response({"detail": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    """Confirm password reset"""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        uidb64 = request.data.get('uid')
+        token = request.data.get('token')
+        new_password = request.data.get('new_password')
+        
+        if not all([uidb64, token, new_password]):
+            return Response({"detail": "Missing parameters"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            user = None
+            
+        if user is not None and default_token_generator.check_token(user, token):
+            user.set_password(new_password)
+            user.save()
+            return Response({"detail": "Password has been reset with the new password."}, status=status.HTTP_200_OK)
+        else:
+            return Response({"detail": "Invalid token or user ID."}, status=status.HTTP_400_BAD_REQUEST)
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
     """Get/Update user profile"""
