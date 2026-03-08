@@ -3,6 +3,7 @@ from django.urls import path
 from apps.users.views import (
     AuthorDetailView,
     AuthorFollowToggleView,
+    AuthorRankingView,
     CustomTokenObtainPairView,
     FacebookAuthView,
     GoogleAuthView,
@@ -13,7 +14,6 @@ from apps.users.views import (
     UserDetailView,
 )
 
-
 urlpatterns = [
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("auth/login/", CustomTokenObtainPairView.as_view(), name="auth-login"),
@@ -21,6 +21,7 @@ urlpatterns = [
     path("auth/facebook/", FacebookAuthView.as_view(), name="auth-facebook"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
+    path("authors/ranking/", AuthorRankingView.as_view(), name="author-ranking"),
     path("authors/<int:pk>/", AuthorDetailView.as_view(), name="author-detail"),
     path("authors/<int:pk>/follow/", AuthorFollowToggleView.as_view(), name="author-follow-toggle"),
     path("notifications/", NotificationListView.as_view(), name="notification-list"),

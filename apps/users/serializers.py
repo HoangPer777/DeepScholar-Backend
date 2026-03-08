@@ -1,3 +1,4 @@
+import uuid
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -67,13 +68,31 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """
-        TODO: Create new user with optional author profile
+        Create new user with optional author profile
         1. Extract author profile fields
         2. Create user with user_code
         3. Create Author profile if role=author
         """
-        # TODO: Implementation
-        return None
+        affiliation = validated_data.pop('affiliation', '')
+        bio = validated_data.pop('bio', '')
+        password = validated_data.pop('password')
+        role = validated_data.get('role', 'user')
+        
+        # Generate user_code
+        validated_data['user_code'] = f"USR-{uuid.uuid4().hex[:8].upper()}"
+        
+        user = User.objects.create_user(password=password, **validated_data)
+        
+        if role == 'author':
+            author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
+            Author.objects.create(
+                user=user,
+                author_code=author_code,
+                affiliation=affiliation,
+                bio=bio
+            )
+            
+        return user
 
 
 class SocialAuthSerializer(serializers.Serializer):
@@ -104,18 +123,21 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         """
-        TODO: Add custom claims to JWT token
+        Add custom claims to JWT token
         - email
         - role
         """
         token = super().get_token(user)
-        # TODO: Add custom claims
+        token['email'] = user.email
+        token['role'] = user.role
         return token
 
     def validate(self, attrs):
         """
-        TODO: Validate credentials and return user data with token
+        Validate credentials and return user data with token
         """
         data = super().validate(attrs)
-        # TODO: Add user serialization
+        
+        user_serializer = UserSerializer(self.user)
+        data['user'] = user_serializer.data
         return data
