@@ -1,10 +1,7 @@
-from django.urls import path
+from rest_framework.routers import DefaultRouter
+from .views import ArticleViewSet
 
-from apps.articles.views import ArticleDetailView, ArticleListCreateView, UploadUrlView
+router = DefaultRouter()
+router.register(r'articles', ArticleViewSet, basename='article')
 
-
-urlpatterns = [
-    path("articles/", ArticleListCreateView.as_view(), name="article-list-create"),
-    path("articles/upload_url/", UploadUrlView.as_view(), name="article-upload-url"),
-    path("articles/<slug:slug>/", ArticleDetailView.as_view(), name="article-detail"),
-]
+urlpatterns = router.urls
