@@ -3,26 +3,26 @@ from apps.users.models import Author
 
 class Article(models.Model):
     author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='articles')
-    slug = models.SlugField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
     title = models.TextField()
-    abstract = models.TextField()
-    content = models.TextField()
-    pdf_url = models.TextField()
+    abstract = models.TextField(blank=True, null=True)
+    content = models.TextField(blank=True, null=True)
+    pdf_url = models.TextField(blank=True, null=True)
     view_count = models.IntegerField(default=0)
     like_count = models.IntegerField(default=0)
     bookmark_count = models.IntegerField(default=0)
     share_count = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'articles'
+        indexes = [
+            models.Index(fields=['slug']),
+            models.Index(fields=['title']),
+            models.Index(fields=['created_at']),
+        ]
 
-class ArticleChunk(models.Model):
-    article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name='chunks')
-    chunk_index = models.IntegerField()
-    content = models.TextField()
-
-    class Meta:
-        db_table = 'article_chunks'
+    def __str__(self):
+        return str(self.title)

@@ -21,6 +21,8 @@ services:
   backend:
     build: .
     container_name: deepscholar-backend
+    env_file:
+      - .env
     environment:
       - DJANGO_SECRET_KEY=change-me
       - DJANGO_DEBUG=true
