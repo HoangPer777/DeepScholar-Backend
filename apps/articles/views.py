@@ -1,6 +1,5 @@
 import os
 import uuid
-import boto3
 from django.db.models import F
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
@@ -21,12 +20,12 @@ class ArticlePagination(PageNumberPagination):
 
 
 class ArticleViewSet(viewsets.ModelViewSet):
-    queryset = Article.objects.filter(is_active=True).select_related('author')
+    queryset = Article.objects.filter(is_active=True).prefetch_related('authors')
     lookup_field = 'slug'
     permission_classes = [IsAuthenticatedOrReadOnly | IsInternalService]
     pagination_class = ArticlePagination
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
-    filterset_fields = ['author']
+    filterset_fields = ['authors']
     ordering_fields = ['view_count', 'created_at']
     ordering = ['-created_at']
     search_fields = ['title', 'abstract']
@@ -68,7 +67,7 @@ class ArticleViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         if not hasattr(self.request.user, 'author_profile'):
             raise serializers.ValidationError({"detail": "User is not an author. Only authors can create articles."})
-        serializer.save(author=self.request.user.author_profile)
+        serializer.save()
 
     def destroy(self, request, *args, **kwargs):
         # Perform soft delete
@@ -114,6 +113,7 @@ class ArticleViewSet(viewsets.ModelViewSet):
         file_path = f"articles/{uuid.uuid4()}_{file_name}"
 
         try:
+            import boto3
             s3_client = boto3.client(
                 's3',
                 endpoint_url=endpoint_url,

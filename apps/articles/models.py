@@ -2,7 +2,7 @@ from django.db import models
 from apps.users.models import Author
 
 class Article(models.Model):
-    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='articles')
+    authors = models.ManyToManyField(Author, related_name='articles', through='ArticleAuthor')
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
     title = models.TextField()
     abstract = models.TextField(blank=True, null=True)
@@ -26,3 +26,17 @@ class Article(models.Model):
 
     def __str__(self):
         return str(self.title)
+
+class ArticleAuthor(models.Model):
+    article = models.ForeignKey(Article, on_delete=models.CASCADE)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE)
+    order = models.PositiveIntegerField(default=1)
+    is_corresponding = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'article_authors'
+        ordering = ['order']
+        unique_together = ('article', 'author')
+
+    def __str__(self):
+        return f"{self.author} - {self.article}"

@@ -230,11 +230,15 @@ class AuthorFollowToggleView(APIView):
             return Response({"detail": "Successfully unfollowed the author."}, status=status.HTTP_200_OK)
 
 
+from rest_framework.filters import SearchFilter
+
 class AuthorRankingView(generics.ListAPIView):
     """Get authors ordered by score"""
     queryset = Author.objects.all().order_by('-total_score')
     serializer_class = AuthorSerializer
     permission_classes = [permissions.AllowAny]
+    filter_backends = [SearchFilter]
+    search_fields = ['author_code', 'user__full_name', 'affiliation']
 
 
 class NotificationListView(generics.ListAPIView):
