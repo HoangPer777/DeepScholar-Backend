@@ -5,6 +5,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import F
 from django.shortcuts import get_object_or_404
+from django.conf import settings
+from django.core.mail import send_mail
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
@@ -72,8 +74,14 @@ class GoogleAuthView(BaseSocialAuthView):
             return Response({"detail": "id_token is required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            # Note: For production, you must set audience to your Client ID
-            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), clock_skew_in_seconds=10)
+            # Verify the ID token using Google's verification library
+            # BUG-006: Ensure audience is validated against our Client ID
+            idinfo = id_token.verify_oauth2_token(
+                token, 
+                google_requests.Request(), 
+                audience=settings.GOOGLE_CLIENT_ID or None,
+                clock_skew_in_seconds=10
+            )
             serializer = SocialAuthSerializer(data={
                 'email': idinfo.get('email'),
                 'full_name': idinfo.get('name', ''),
@@ -140,11 +148,19 @@ class PasswordResetRequestView(APIView):
             
         user = User.objects.filter(email=email).first()
         if user:
+            frontend_url = (settings.FRONTEND_URL or "").rstrip("/")
+            if not frontend_url:
+                return Response({"detail": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
             token = default_token_generator.make_token(user)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
-            # In a real app, send email here. For now, print to console.
-            reset_link = f"http://localhost:3000/reset-password?uid={uid}&token={token}"
-            print(f"PASSWORD RESET LINK: {reset_link}")
+            reset_link = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+            send_mail(
+                subject="DeepScholar Password Reset",
+                message=f"Reset your password using this link: {reset_link}",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=True,
+            )
             
         return Response({"detail": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
 

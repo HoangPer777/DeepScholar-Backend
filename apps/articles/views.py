@@ -3,6 +3,7 @@ import uuid
 from django.db.models import F
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
@@ -55,13 +56,34 @@ class ArticleViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
+    def _is_internal_service(self, request):
+        return IsInternalService().has_permission(request, self)
+
+    def _can_manage_article(self, user, article):
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff or user.is_superuser:
+            return True
+        author_profile = getattr(user, 'author_profile', None)
+        if not author_profile:
+            return False
+        return article.authors.filter(id=author_profile.id).exists()
+
+    def _enforce_article_manage_permission(self, request, article):
+        if self._is_internal_service(request):
+            return
+        if self._can_manage_article(request.user, article):
+            return
+        raise PermissionDenied("You do not have permission to modify this article.")
+
     def update(self, request, *args, **kwargs):
-        print(f"[Backend] Received UPDATE request for article {kwargs.get('slug')}")
-        print(f"[Backend] Headers: {request.headers.get('X-Internal-Service-Key', 'No Key')}")
+        article = self.get_object()
+        self._enforce_article_manage_permission(request, article)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        print(f"[Backend] Received PARTIAL_UPDATE request for article {kwargs.get('slug')}")
+        article = self.get_object()
+        self._enforce_article_manage_permission(request, article)
         return super().partial_update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
@@ -70,8 +92,8 @@ class ArticleViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
-        # Perform soft delete
         instance = self.get_object()
+        self._enforce_article_manage_permission(request, instance)
         instance.is_active = False
         instance.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
