@@ -4,9 +4,11 @@ from apps.users.models import Author
 
 
 class AuthorBasicSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(read_only=True)
+
     class Meta:
         model = Author
-        fields = ['id', 'author_code', 'affiliation']
+        fields = ['id', 'author_code', 'full_name', 'affiliation']
 
 
 class ArticleListSerializer(serializers.ModelSerializer):
@@ -27,7 +29,7 @@ class ArticleDetailSerializer(serializers.ModelSerializer):
 
 class ArticleCreateUpdateSerializer(serializers.ModelSerializer):
     co_authors = serializers.ListField(
-        child=serializers.IntegerField(), write_only=True, required=False
+        child=serializers.CharField(), write_only=True, required=False
     )
 
     class Meta:
@@ -50,6 +52,7 @@ class ArticleCreateUpdateSerializer(serializers.ModelSerializer):
     def _handle_co_authors(self, article, co_authors_ids, update=False):
         from .models import ArticleAuthor
         from apps.users.models import Author
+        import uuid
         
         request = self.context.get('request')
         primary_author = getattr(request.user, 'author_profile', None) if request else None
@@ -63,9 +66,19 @@ class ArticleCreateUpdateSerializer(serializers.ModelSerializer):
 
         if co_authors_ids:
             order = 2
-            for author_id in co_authors_ids:
+            for author_item in co_authors_ids:
+                author_item = str(author_item).strip()
+                if not author_item:
+                    continue
                 try:
-                    author = Author.objects.get(id=author_id)
+                    if author_item.isdigit():
+                        author = Author.objects.get(id=int(author_item))
+                    else:
+                        author = Author.objects.filter(author_name=author_item, user__isnull=True).first()
+                        if not author:
+                            author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
+                            author = Author.objects.create(author_name=author_item, author_code=author_code)
+
                     if author != primary_author:
                         ArticleAuthor.objects.get_or_create(
                             article=article, author=author,

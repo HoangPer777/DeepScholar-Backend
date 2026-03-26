@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging
 from django.db.models import F
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
@@ -12,6 +13,8 @@ from rest_framework.pagination import PageNumberPagination
 from .models import Article
 from .serializers import ArticleListSerializer, ArticleDetailSerializer, ArticleCreateUpdateSerializer
 from apps.core.permissions import IsInternalService
+
+logger = logging.getLogger(__name__)
 
 
 class ArticlePagination(PageNumberPagination):
@@ -57,6 +60,8 @@ class ArticleViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def _is_internal_service(self, request):
+        has_internal_key = bool(request.headers.get("X-Internal-Service-Key"))
+        logger.info(f"Checking internal service access. Header present: {has_internal_key}")
         return IsInternalService().has_permission(request, self)
 
     def _can_manage_article(self, user, article):
