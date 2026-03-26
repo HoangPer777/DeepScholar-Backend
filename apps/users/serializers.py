@@ -10,11 +10,14 @@ User = get_user_model()
 
 
 class AuthorSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(read_only=True)
+    
     class Meta:
         model = Author
         fields = [
             "id",
             "author_code",
+            "full_name",
             "affiliation",
             "bio",
             "total_score",

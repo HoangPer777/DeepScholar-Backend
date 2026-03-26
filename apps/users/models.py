@@ -57,13 +57,20 @@ class User(AbstractBaseUser, PermissionsMixin):
 class Author(models.Model):
     """Author profile for academic users"""
     author_code = models.CharField(max_length=50, unique=True)
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='author_profile')
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, related_name='author_profile', null=True, blank=True)
+    author_name = models.CharField(max_length=255, blank=True, null=True)
     affiliation = models.CharField(max_length=255, blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
     total_score = models.IntegerField(default=0)  # Ranking score
     follower_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
+
+    @property
+    def full_name(self):
+        if self.user and self.user.full_name:
+            return self.user.full_name
+        return self.author_name or self.author_code
 
     class Meta:
         db_table = 'authors'
