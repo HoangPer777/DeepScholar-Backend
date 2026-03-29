@@ -7,6 +7,8 @@ from django.db.models import F
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.core.mail import send_mail
+from django.core.exceptions import ValidationError
+from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
@@ -190,6 +192,40 @@ class PasswordResetConfirmView(APIView):
         else:
             return Response({"detail": "Invalid token or user ID."}, status=status.HTTP_400_BAD_REQUEST)
 
+
+class ChangePasswordView(APIView):
+    """Change password for authenticated user"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+
+        if not all([current_password, new_password, confirm_password]):
+            return Response({"detail": "Missing required fields."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_password != confirm_password:
+            return Response({"detail": "New password and confirmation do not match."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+
+        if not user.check_password(current_password):
+            return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if current_password == new_password:
+            return Response({"detail": "New password must be different from current password."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            validate_password(new_password, user=user)
+        except ValidationError as e:
+            message = e.messages[0] if e.messages else "Password is invalid."
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
+
 class UserDetailView(generics.RetrieveUpdateAPIView):
     """Get/Update user profile"""
     queryset = User.objects.all()
@@ -207,11 +243,21 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
         return super().update(request, *args, **kwargs)
 
 
-class AuthorDetailView(generics.RetrieveAPIView):
-    """Get author public profile"""
+class AuthorDetailView(generics.RetrieveUpdateAPIView):
+    """Get author public profile or update own author profile"""
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
-    permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.user_id != request.user.id:
+            return Response({"detail": "You do not have permission to edit this author profile."}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
 
 
 class AuthorFollowToggleView(APIView):

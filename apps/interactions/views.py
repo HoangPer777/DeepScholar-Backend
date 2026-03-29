@@ -3,7 +3,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.articles.models import Article
-from apps.interactions.models import Comment
+from apps.articles.serializers import ArticleListSerializer
+from apps.interactions.models import Comment, Bookmark
 from apps.interactions.serializers import CommentSerializer
 
 
@@ -37,3 +38,16 @@ class CommentListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         # TODO: Save comment with article and user
         pass
+
+
+class BookmarkedArticlesView(generics.ListAPIView):
+    """Get all bookmarked articles for the authenticated user"""
+    serializer_class = ArticleListSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        return Article.objects.filter(
+            bookmarks__user=user,
+            is_active=True
+        ).distinct().order_by('-bookmarks__created_at')
