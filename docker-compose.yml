@@ -19,12 +19,13 @@ services:
       - "6379:6379"
 
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
     container_name: deepscholar-backend
     env_file:
       - .env
     environment:
-      - DJANGO_SECRET_KEY=change-me
       - DJANGO_DEBUG=true
       - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend
       - CSRF_TRUSTED_ORIGINS=http://localhost:3000
