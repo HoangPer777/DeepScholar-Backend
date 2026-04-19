@@ -5,7 +5,7 @@ class Article(models.Model):
     authors = models.ManyToManyField(Author, related_name='articles', through='ArticleAuthor')
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
     title = models.TextField()
-    abstract = models.TextField(blank=True, null=True) # abstract
+    abstract = models.TextField(blank=True, null=True) 
     content = models.TextField(blank=True, null=True)
     pdf_url = models.TextField(blank=True, null=True)
     view_count = models.IntegerField(default=0)
