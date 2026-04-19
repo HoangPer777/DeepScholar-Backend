@@ -48,6 +48,7 @@ jobs:
               -e DJANGO_ALLOWED_HOSTS="${{ secrets.DJANGO_ALLOWED_HOSTS }}" \
               -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               -e REDIS_URL="${{ secrets.REDIS_URL }}" \
+              -e INTERNAL_SERVICE_KEY="${{ secrets.INTERNAL_SERVICE_KEY }}" \
               ${{ secrets.DOCKER_USERNAME }}/deepscholar-backend:latest
 
             docker exec deepscholar-backend python manage.py migrate --noinput
