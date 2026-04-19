@@ -60,10 +60,12 @@ TEMPLATES = [
     },
 ]
 
+_db_url = os.getenv("DATABASE_URL")
+if not _db_url:
+    raise RuntimeError("DATABASE_URL environment variable is required")
+
 DATABASES = {
-    "default": dj_database_url.parse(
-        os.getenv("DATABASE_URL", "postgresql://deepscholar:deepscholar@localhost:5432/deepscholar")
-    )
+    "default": dj_database_url.parse(_db_url, conn_max_age=0, ssl_require=True)
 }
 
 AUTH_USER_MODEL = "users.User"
