@@ -145,11 +145,30 @@ class SocialAuthSerializer(serializers.Serializer):
                 )
         else:
             # Update provider info if needed
+            update_fields = []
             if user.provider == 'local':
-                 user.provider = provider
-                 user.provider_id = provider_id
-                 user.save()
-            
+                user.provider = provider
+                user.provider_id = provider_id
+                update_fields += ['provider', 'provider_id']
+
+            # Upgrade role to author if requested and not already author
+            if role == 'author' and user.role != 'author':
+                user.role = 'author'
+                update_fields.append('role')
+
+            if update_fields:
+                user.save(update_fields=update_fields)
+
+            # Create Author profile if role is author but profile missing
+            if user.role == 'author' and not Author.objects.filter(user=user).exists():
+                author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
+                Author.objects.create(
+                    user=user,
+                    author_code=author_code,
+                    bio="",
+                    affiliation=""
+                )
+
         return user
 
 

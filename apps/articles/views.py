@@ -3,6 +3,7 @@ import uuid
 import logging
 from django.db.models import F
 from rest_framework import viewsets, status, serializers
+from apps.users.models import Author
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -92,8 +93,24 @@ class ArticleViewSet(viewsets.ModelViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        if not hasattr(self.request.user, 'author_profile'):
+        user = self.request.user
+
+        # Bug_Condition: user.role != 'author' → reject (preserve existing behavior)
+        if user.role != 'author':
             raise serializers.ValidationError({"detail": "User is not an author. Only authors can create articles."})
+
+        # Auto-heal: user.role == 'author' but missing author_profile (e.g. after migration)
+        if not hasattr(user, 'author_profile'):
+            author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
+            Author.objects.get_or_create(
+                user=user,
+                defaults={"author_code": author_code, "author_name": user.full_name},
+            )
+            logger.warning(
+                "Auto-created author_profile for user %s (role=author, missing after migration)",
+                user.id,
+            )
+
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):

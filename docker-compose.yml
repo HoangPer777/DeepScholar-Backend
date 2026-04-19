@@ -1,17 +1,4 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: deepscholar-postgres
-    environment:
-      POSTGRES_DB: deepscholar
-      POSTGRES_USER: deepscholar
-      POSTGRES_PASSWORD: deepscholar
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./postgres-init:/docker-entrypoint-initdb.d
-
   redis:
     image: redis:7-alpine
     container_name: deepscholar-redis
@@ -29,7 +16,6 @@ services:
       - DJANGO_DEBUG=true
       - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend
       - CSRF_TRUSTED_ORIGINS=http://localhost:3000
-      - DATABASE_URL=postgresql://deepscholar:deepscholar@postgres:5432/deepscholar
       - REDIS_URL=redis://redis:6379/0
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
@@ -37,8 +23,4 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
       - redis
-
-volumes:
-  postgres_data:
