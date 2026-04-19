@@ -59,7 +59,7 @@ jobs:
               -e AWS_STORAGE_BUCKET_NAME="${{ secrets.AWS_STORAGE_BUCKET_NAME }}" \
               -e AWS_S3_REGION_NAME="${{ secrets.AWS_S3_REGION_NAME }}" \
               -e AWS_PUBLIC_URL="${{ secrets.AWS_PUBLIC_URL }}" \
-              -e AI_SERVICE_URL="http://localhost:8001/api" \
+              -e AI_SERVICE_URL="${{ secrets.AI_SERVICE_URL }}" \
               ${{ secrets.DOCKER_USERNAME }}/deepscholar-backend:latest
 
             docker exec deepscholar-backend python manage.py migrate --noinput

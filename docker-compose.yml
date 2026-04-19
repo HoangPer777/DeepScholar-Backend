@@ -14,7 +14,7 @@ services:
       - .env
     environment:
       - DJANGO_DEBUG=true
-      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend
+      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,backend,host.docker.internal,172.17.0.1
       - CSRF_TRUSTED_ORIGINS=http://localhost:3000
       - REDIS_URL=redis://redis:6379/0
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
