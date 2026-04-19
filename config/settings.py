@@ -11,7 +11,7 @@ if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY is required")
 
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()] + ['host.docker.internal']
+ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()] + ['host.docker.internal', 'localhost', '127.0.0.1']
 
 INSTALLED_APPS = [
     "django.contrib.admin",
