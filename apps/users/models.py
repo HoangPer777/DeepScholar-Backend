@@ -1,5 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 
 
 class CustomUserManager(BaseUserManager):
@@ -78,12 +80,19 @@ class Author(models.Model):
 
 class Notification(models.Model):
     """User notifications for interactions"""
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    type = models.CharField(max_length=50)  # like, comment, follow, etc.
-    reference_id = models.IntegerField(blank=True, null=True)  # ID of related object
-    message = models.TextField()
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_notifications')
+    verb = models.CharField(max_length=255)
+    target_content_type = models.ForeignKey(ContentType, on_delete=models.SET_NULL, null=True, blank=True)
+    target_object_id = models.PositiveIntegerField(null=True, blank=True)
+    target = GenericForeignKey('target_content_type', 'target_object_id')
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'notifications'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient', 'is_read']),
+            models.Index(fields=['recipient', 'created_at']),
+        ]

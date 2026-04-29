@@ -6,10 +6,14 @@ class Comment(models.Model):
     article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
     content = models.TextField()
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'comments'
+        indexes = [
+            models.Index(fields=['article', 'parent']),
+        ]
 
 class Like(models.Model):
     article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name='likes')
@@ -32,6 +36,7 @@ class Bookmark(models.Model):
 class ArticleShare(models.Model):
     article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name='shares')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shares')
+    platform = models.CharField(max_length=100, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

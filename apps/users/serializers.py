@@ -173,9 +173,12 @@ class SocialAuthSerializer(serializers.Serializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
+    actor = UserSerializer(read_only=True)
+
     class Meta:
         model = Notification
-        fields = ["id", "type", "reference_id", "message", "is_read", "created_at"]
+        fields = ["id", "actor", "verb", "target_content_type", "target_object_id", "is_read", "created_at"]
+        read_only_fields = ["id", "actor", "created_at"]
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -2,14 +2,11 @@ from django.urls import path
 
 from apps.users.views import (
     AuthorDetailView,
-    AuthorFollowToggleView,
     AuthorRankingView,
     CustomTokenObtainPairView,
     FacebookAuthView,
     GoogleAuthView,
     MeView,
-    NotificationListView,
-    NotificationReadView,
     ChangePasswordView,
     RegisterView,
     UserDetailView,
@@ -29,7 +26,6 @@ urlpatterns = [
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
     path("authors/ranking/", AuthorRankingView.as_view(), name="author-ranking"),
     path("authors/<int:pk>/", AuthorDetailView.as_view(), name="author-detail"),
-    path("authors/<int:pk>/follow/", AuthorFollowToggleView.as_view(), name="author-follow-toggle"),
-    path("notifications/", NotificationListView.as_view(), name="notification-list"),
-    path("notifications/<int:pk>/read/", NotificationReadView.as_view(), name="notification-read"),
+    # Note: authors/<pk>/follow/, notifications/, notifications/<pk>/read/
+    # are now handled by apps.interactions.urls
 ]
