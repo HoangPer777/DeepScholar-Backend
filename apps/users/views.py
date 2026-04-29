@@ -309,7 +309,7 @@ class NotificationListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        return Notification.objects.filter(recipient=self.request.user).order_by('-created_at')
 
 
 class NotificationReadView(APIView):
@@ -317,7 +317,7 @@ class NotificationReadView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, pk):
-        notification = get_object_or_404(Notification, pk=pk, user=request.user)
+        notification = get_object_or_404(Notification, pk=pk, recipient=request.user)
         notification.is_read = True
         notification.save(update_fields=['is_read'])
         return Response({"detail": "Notification marked as read."}, status=status.HTTP_200_OK)
