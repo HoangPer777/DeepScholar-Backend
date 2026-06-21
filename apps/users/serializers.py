@@ -11,6 +11,10 @@ User = get_user_model()
 
 class AuthorSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
+    avatar_url = serializers.SerializerMethodField()
+
+    def get_avatar_url(self, obj):
+        return obj.user.avatar_url if obj.user else None
     
     class Meta:
         model = Author
@@ -18,6 +22,7 @@ class AuthorSerializer(serializers.ModelSerializer):
             "id",
             "author_code",
             "full_name",
+            "avatar_url",
             "affiliation",
             "bio",
             "total_score",

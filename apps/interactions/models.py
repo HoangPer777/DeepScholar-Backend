@@ -12,7 +12,7 @@ class Comment(models.Model):
     class Meta:
         db_table = 'comments'
         indexes = [
-            models.Index(fields=['article', 'parent']),
+            models.Index(fields=['article', 'parent'], name='comments_article_parent_idx'),
         ]
 
 class Like(models.Model):

@@ -2,7 +2,6 @@ from django.urls import path
 
 from apps.users.views import (
     AuthorDetailView,
-    AuthorRankingView,
     CustomTokenObtainPairView,
     FacebookAuthView,
     GoogleAuthView,
@@ -24,7 +23,6 @@ urlpatterns = [
     path("auth/change-password/", ChangePasswordView.as_view(), name="auth-change-password"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
-    path("authors/ranking/", AuthorRankingView.as_view(), name="author-ranking"),
     path("authors/<int:pk>/", AuthorDetailView.as_view(), name="author-detail"),
     # Note: authors/<pk>/follow/, notifications/, notifications/<pk>/read/
     # are now handled by apps.interactions.urls

@@ -32,7 +32,7 @@ class ArticleViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
     filterset_fields = ['authors']
     ordering_fields = ['view_count', 'created_at']
-    ordering = ['-created_at']
+    ordering = ['-created_at', '-id']
     search_fields = ['title', 'abstract']
 
     def get_serializer_class(self):
