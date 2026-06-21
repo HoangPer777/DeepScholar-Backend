@@ -1,9 +1,11 @@
 import uuid
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.users.models import Author, Notification
+from apps.users.services import become_author
 
 
 User = get_user_model()
@@ -52,11 +54,15 @@ class UserSerializer(serializers.ModelSerializer):
             "created_at",
             "author_profile",
         ]
-        read_only_fields = ["id", "user_code", "provider", "provider_id", "created_at"]
+        read_only_fields = [
+            "id", "user_code", "role", "provider", "provider_id",
+            "is_active", "created_at", "author_profile",
+        ]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default=User.ROLE_USER)
     affiliation = serializers.CharField(required=False, allow_blank=True)
     bio = serializers.CharField(required=False, allow_blank=True)
 
@@ -74,6 +80,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             "bio",
         ]
 
+    @transaction.atomic
     def create(self, validated_data):
         """
         Create new user with optional author profile
@@ -91,13 +98,11 @@ class RegisterSerializer(serializers.ModelSerializer):
         
         user = User.objects.create_user(password=password, **validated_data)
         
-        if role == 'author':
-            author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
-            Author.objects.create(
+        if role == User.ROLE_AUTHOR:
+            user, _, _ = become_author(
                 user=user,
-                author_code=author_code,
                 affiliation=affiliation,
-                bio=bio
+                bio=bio,
             )
             
         return user
@@ -108,7 +113,6 @@ class SocialAuthSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     provider_id = serializers.CharField(max_length=255, required=False, allow_blank=True)
     avatar_url = serializers.CharField(required=False, allow_blank=True)
-    role = serializers.CharField(required=False, default="user")
 
     def save(self, provider):
         """
@@ -121,7 +125,6 @@ class SocialAuthSerializer(serializers.Serializer):
         full_name = self.validated_data.get('full_name', '')
         provider_id = self.validated_data.get('provider_id', '')
         avatar_url = self.validated_data.get('avatar_url', '')
-        role = self.validated_data.get('role', 'user')
 
         user = User.objects.filter(email=email).first()
         if not user:
@@ -137,17 +140,8 @@ class SocialAuthSerializer(serializers.Serializer):
                 provider=provider,
                 provider_id=provider_id,
                 avatar_url=avatar_url,
-                role=role
+                role=User.ROLE_USER
             )
-            
-            if role == 'author':
-                author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
-                Author.objects.create(
-                    user=user,
-                    author_code=author_code,
-                    bio="",
-                    affiliation=""
-                )
         else:
             # Update provider info if needed
             update_fields = []
@@ -156,25 +150,31 @@ class SocialAuthSerializer(serializers.Serializer):
                 user.provider_id = provider_id
                 update_fields += ['provider', 'provider_id']
 
-            # Upgrade role to author if requested and not already author
-            if role == 'author' and user.role != 'author':
-                user.role = 'author'
-                update_fields.append('role')
-
             if update_fields:
                 user.save(update_fields=update_fields)
 
-            # Create Author profile if role is author but profile missing
-            if user.role == 'author' and not Author.objects.filter(user=user).exists():
-                author_code = f"AUTH-{uuid.uuid4().hex[:8].upper()}"
-                Author.objects.create(
-                    user=user,
-                    author_code=author_code,
-                    bio="",
-                    affiliation=""
-                )
-
         return user
+
+
+class BecomeAuthorSerializer(serializers.Serializer):
+    author_name = serializers.CharField(max_length=255, required=False, allow_blank=True, trim_whitespace=True)
+    affiliation = serializers.CharField(max_length=255, required=False, allow_blank=True, trim_whitespace=True)
+    bio = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    accepted_author_terms = serializers.BooleanField()
+
+    def validate_accepted_author_terms(self, value):
+        if not value:
+            raise serializers.ValidationError("You must accept the author publishing terms.")
+        return value
+
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        return become_author(
+            user=user,
+            author_name=self.validated_data.get('author_name', ''),
+            affiliation=self.validated_data.get('affiliation', ''),
+            bio=self.validated_data.get('bio', ''),
+        )
 
 
 class NotificationSerializer(serializers.ModelSerializer):

@@ -68,3 +68,7 @@ htmlcov/
 tests/
 !apps/ranking/tests/
 !apps/ranking/tests/*.py
+!apps/users/tests/
+!apps/users/tests/*.py
+!apps/articles/tests/
+!apps/articles/tests/*.py

@@ -11,6 +11,7 @@ from apps.users.views import (
     UserDetailView,
     PasswordResetRequestView,
     PasswordResetConfirmView,
+    BecomeAuthorView,
 )
 
 urlpatterns = [
@@ -22,6 +23,7 @@ urlpatterns = [
     path("auth/password-reset-confirm/", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
     path("auth/change-password/", ChangePasswordView.as_view(), name="auth-change-password"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("auth/become-author/", BecomeAuthorView.as_view(), name="auth-become-author"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
     path("authors/<int:pk>/", AuthorDetailView.as_view(), name="author-detail"),
     # Note: authors/<pk>/follow/, notifications/, notifications/<pk>/read/
