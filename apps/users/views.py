@@ -21,7 +21,8 @@ from apps.users.serializers import (
     UserSerializer,
     AuthorSerializer,
     NotificationSerializer,
-    SocialAuthSerializer
+    SocialAuthSerializer,
+    BecomeAuthorSerializer,
 )
 import requests
 from google.oauth2 import id_token
@@ -59,6 +60,25 @@ class MeView(APIView):
         return Response(serializer.data)
 
 
+class BecomeAuthorView(APIView):
+    """Promote the authenticated user and create an author profile."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = BecomeAuthorSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user, _, created = serializer.save()
+
+        refresh = CustomTokenObtainPairSerializer.get_token(user)
+        return Response({
+            'detail': 'Author profile created successfully.' if created else 'Author profile is already active.',
+            'created': created,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'user': UserSerializer(user).data,
+        }, status=status.HTTP_200_OK)
+
+
 class BaseSocialAuthView(APIView):
     """Base class for OAuth social login"""
     permission_classes = [permissions.AllowAny]
@@ -71,7 +91,6 @@ class GoogleAuthView(BaseSocialAuthView):
     """Handle Google OAuth login"""
     def post(self, request):
         token = request.data.get('id_token')
-        role = request.data.get('role', 'user')
         if not token:
             return Response({"detail": "id_token is required"}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -89,7 +108,6 @@ class GoogleAuthView(BaseSocialAuthView):
                 'full_name': idinfo.get('name', ''),
                 'provider_id': idinfo.get('sub'),
                 'avatar_url': idinfo.get('picture', ''),
-                'role': role
             })
             if serializer.is_valid():
                 user = serializer.save(provider='google')
@@ -108,7 +126,6 @@ class FacebookAuthView(BaseSocialAuthView):
     """Handle Facebook OAuth login"""
     def post(self, request):
         access_token = request.data.get('access_token')
-        role = request.data.get('role', 'user')
         if not access_token:
             return Response({"detail": "access_token is required"}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -125,7 +142,6 @@ class FacebookAuthView(BaseSocialAuthView):
                 'full_name': fb_data.get('name', ''),
                 'provider_id': fb_data.get('id'),
                 'avatar_url': fb_data.get('picture', {}).get('data', {}).get('url', ''),
-                'role': role
             })
             if serializer.is_valid():
                 user = serializer.save(provider='facebook')
@@ -290,17 +306,6 @@ class AuthorFollowToggleView(APIView):
             follow_record.delete()
             Author.objects.filter(pk=pk).update(follower_count=F('follower_count') - 1)
             return Response({"detail": "Successfully unfollowed the author."}, status=status.HTTP_200_OK)
-
-
-from rest_framework.filters import SearchFilter
-
-class AuthorRankingView(generics.ListAPIView):
-    """Get authors ordered by score"""
-    queryset = Author.objects.all().order_by('-total_score')
-    serializer_class = AuthorSerializer
-    permission_classes = [permissions.AllowAny]
-    filter_backends = [SearchFilter]
-    search_fields = ['author_code', 'user__full_name', 'affiliation']
 
 
 class NotificationListView(generics.ListAPIView):

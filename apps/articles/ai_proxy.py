@@ -3,7 +3,9 @@ import requests
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from .models import Article
+from apps.core.permissions import IsAuthor
 
 
 def _ai_service_urls():
@@ -27,7 +29,7 @@ def _ai_service_urls():
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsAuthor])
 def trigger_pdf_pipeline(request):
     """
     Proxy endpoint: receives the PDF trigger from the Frontend and forwards it
@@ -44,6 +46,31 @@ def trigger_pdf_pipeline(request):
     except (TypeError, ValueError):
         print(f"[Backend Proxy] ERROR: Invalid article_id: {payload.get('article_id')}")
         return Response({"error": "Invalid article_id"}, status=400)
+
+    try:
+        article = Article.objects.prefetch_related('authors').get(id=article_id, is_active=True)
+    except Article.DoesNotExist:
+        return Response({"error": "Article not found"}, status=404)
+
+    user = request.user
+    if not (user.is_staff or user.is_superuser):
+        author_profile = getattr(user, 'author_profile', None)
+        if not author_profile or not article.authors.filter(pk=author_profile.pk).exists():
+            raise PermissionDenied("You do not have permission to process this article.")
+
+    if slug and slug != article.slug:
+        return Response({"error": "Slug does not match the article"}, status=400)
+
+    requested_pdf_url = payload.get('pdf_url')
+    if requested_pdf_url and requested_pdf_url != article.pdf_url:
+        return Response({"error": "PDF URL does not match the article"}, status=400)
+
+    payload = {
+        **payload,
+        'article_id': article.id,
+        'slug': article.slug,
+        'pdf_url': article.pdf_url,
+    }
 
     print(f"[Backend Proxy] TRIGGER: Starting AI sync for ID {article_id} (slug: {slug})")
 

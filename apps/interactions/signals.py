@@ -1,11 +1,57 @@
 from django.contrib.contenttypes.models import ContentType
 from django.db.models import F
-from django.db.models.signals import post_save, post_delete
+from django.db import transaction
+from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
 
-from apps.articles.models import Article
+from apps.articles.models import Article, ArticleAuthor
 from apps.users.models import Author, Notification
 from apps.interactions.models import Like, Bookmark, ArticleShare, AuthorFollow, Comment
+
+
+def _schedule_ranking_recalculation(author_ids):
+    author_ids = tuple(set(author_ids))
+    if not author_ids:
+        return
+
+    def recalculate():
+        from apps.ranking.services import recalculate_authors
+        recalculate_authors(author_ids)
+
+    transaction.on_commit(recalculate)
+
+
+def _article_author_ids(article_id):
+    return ArticleAuthor.objects.filter(article_id=article_id).values_list(
+        "author_id", flat=True
+    )
+
+
+@receiver(post_save, sender=Like, dispatch_uid="ranking.like_post_save")
+@receiver(post_delete, sender=Like, dispatch_uid="ranking.like_post_delete")
+@receiver(post_save, sender=Comment, dispatch_uid="ranking.comment_post_save")
+@receiver(post_delete, sender=Comment, dispatch_uid="ranking.comment_post_delete")
+def recalculate_ranking_after_interaction(sender, instance, **kwargs):
+    _schedule_ranking_recalculation(_article_author_ids(instance.article_id))
+
+
+@receiver(pre_delete, sender=ArticleAuthor, dispatch_uid="ranking.article_author_pre_delete")
+def remember_removed_article_author(sender, instance, **kwargs):
+    instance._ranking_author_id = instance.author_id
+
+
+@receiver(post_save, sender=ArticleAuthor, dispatch_uid="ranking.article_author_post_save")
+@receiver(post_delete, sender=ArticleAuthor, dispatch_uid="ranking.article_author_post_delete")
+def recalculate_ranking_after_article_author(sender, instance, **kwargs):
+    ids = list(_article_author_ids(instance.article_id))
+    if getattr(instance, "_ranking_author_id", None):
+        ids.append(instance._ranking_author_id)
+    _schedule_ranking_recalculation(ids)
+
+
+@receiver(post_save, sender=Article, dispatch_uid="ranking.article_post_save")
+def recalculate_ranking_after_article(sender, instance, **kwargs):
+    _schedule_ranking_recalculation(_article_author_ids(instance.id))
 
 
 # ---------------------------------------------------------------------------

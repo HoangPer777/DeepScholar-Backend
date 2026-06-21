@@ -34,13 +34,19 @@ class CustomUserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     """Custom User model with OAuth support"""
+    ROLE_USER = 'user'
+    ROLE_AUTHOR = 'author'
+    ROLE_CHOICES = [
+        (ROLE_USER, 'User'),
+        (ROLE_AUTHOR, 'Author'),
+    ]
     user_code = models.CharField(max_length=50, unique=True)
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=255)
     GENDER_CHOICES = [('male', 'Male'), ('female', 'Female'), ('other', 'Other')]
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
-    role = models.CharField(max_length=20, default='user')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_USER)
     avatar_url = models.TextField(blank=True, null=True)
     provider = models.CharField(max_length=50, default='local')  # local, google, facebook
     provider_id = models.CharField(max_length=255, blank=True, null=True)
@@ -93,6 +99,6 @@ class Notification(models.Model):
         db_table = 'notifications'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['recipient', 'is_read']),
-            models.Index(fields=['recipient', 'created_at']),
+            models.Index(fields=['recipient', 'is_read'], name='notif_recipient_is_read_idx'),
+            models.Index(fields=['recipient', 'created_at'], name='notif_recipient_created_at_idx'),
         ]
