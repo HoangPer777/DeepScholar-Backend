@@ -1,6 +1,8 @@
+import os
+from unittest.mock import patch
+
 from django.test import TestCase
 from rest_framework.test import APIClient
-from unittest.mock import patch
 
 from apps.articles.models import Article, ArticleAuthor
 from apps.users.models import Author, User
@@ -69,6 +71,7 @@ class AuthorPublishingPermissionTests(TestCase):
 
         response = self.client.post('/api/v1/articles/upload_url/', {
             'file_name': 'paper.pdf',
+            'file_size': 1024,
         }, format='json')
 
         self.assertEqual(response.status_code, 200)
@@ -114,3 +117,22 @@ class AuthorPublishingPermissionTests(TestCase):
         }, format='json')
 
         self.assertEqual(response.status_code, 403)
+
+    @patch.dict(os.environ, {"INTERNAL_SERVICE_KEY": "test-internal-key"})
+    def test_internal_service_cannot_bypass_pdf_callback_with_generic_patch(self):
+        article = Article.objects.create(
+            slug="internal-patch-guard",
+            title="Pending extraction",
+            pdf_url="https://files.example/pending.pdf",
+        )
+
+        response = self.client.patch(
+            f"/api/v1/articles/{article.slug}/",
+            {"title": "Unfenced update"},
+            format="json",
+            HTTP_X_INTERNAL_SERVICE_KEY="test-internal-key",
+        )
+
+        self.assertEqual(response.status_code, 410)
+        article.refresh_from_db()
+        self.assertEqual(article.title, "Pending extraction")
