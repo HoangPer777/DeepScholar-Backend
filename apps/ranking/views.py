@@ -4,7 +4,6 @@ from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.ranking.services import calculate_ranking_metrics
 from apps.users.models import Author
 from apps.ranking.serializers import AuthorRankingSerializer
 
@@ -23,16 +22,12 @@ class AuthorRankingView(APIView):
                 | Q(affiliation__icontains=search)
             )
 
-        authors = list(queryset)
-        metrics = calculate_ranking_metrics([author.id for author in authors])
-        authors.sort(
-            key=lambda author: (
-                -metrics[author.id].total_score,
-                -metrics[author.id].like_count,
-                -metrics[author.id].commenter_count,
-                -metrics[author.id].article_count,
-                author.id,
-            )
+        queryset = queryset.order_by(
+            "-total_score",
+            "-like_count",
+            "-commenter_count",
+            "-article_count",
+            "id",
         )
         try:
             page_size = min(max(int(request.query_params.get("page_size", 20)), 1), 100)
@@ -40,7 +35,7 @@ class AuthorRankingView(APIView):
         except (TypeError, ValueError):
             page_size, page_number = 20, 1
 
-        paginator = Paginator(authors, page_size)
+        paginator = Paginator(queryset, page_size)
         try:
             page = paginator.page(page_number)
         except EmptyPage:
@@ -54,7 +49,6 @@ class AuthorRankingView(APIView):
                     author,
                     context={
                         "request": request,
-                        "metrics": metrics[author.id],
                         "rank": start_rank + offset,
                     },
                 ).data
