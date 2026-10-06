@@ -1,9 +1,11 @@
+import logging
+import time
+
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.db.models import F
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.core.mail import send_mail
@@ -27,6 +29,118 @@ from apps.users.serializers import (
 import requests
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+
+
+logger = logging.getLogger(__name__)
+
+
+class _FacebookConfigurationError(Exception):
+    """Raised when Facebook OAuth cannot be safely verified."""
+
+
+class _FacebookProviderError(Exception):
+    """Raised when the Facebook Graph API cannot be trusted for this request."""
+
+
+class _InvalidFacebookTokenError(Exception):
+    """Raised when Facebook rejects or does not prove the supplied token."""
+
+
+def _facebook_graph_url(path):
+    version = getattr(settings, "FACEBOOK_GRAPH_API_VERSION", "")
+    base_url = "https://graph.facebook.com"
+    if version:
+        base_url = f"{base_url}/{version.strip('/')}"
+    return f"{base_url}/{path.lstrip('/')}"
+
+
+def _facebook_graph_get(path, params):
+    """Call Facebook without exposing token-bearing request details in logs."""
+    try:
+        response = requests.get(
+            _facebook_graph_url(path),
+            params=params,
+            timeout=settings.FACEBOOK_GRAPH_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        logger.warning(
+            "Facebook OAuth provider request failed: %s",
+            exc.__class__.__name__,
+        )
+        raise _FacebookProviderError from exc
+
+    if response.status_code == 429 or response.status_code >= 500:
+        logger.warning(
+            "Facebook OAuth provider returned status=%s",
+            response.status_code,
+        )
+        raise _FacebookProviderError
+    if not response.ok:
+        raise _InvalidFacebookTokenError
+
+    try:
+        payload = response.json()
+    except (TypeError, ValueError) as exc:
+        logger.warning("Facebook OAuth provider returned malformed JSON")
+        raise _FacebookProviderError from exc
+
+    if not isinstance(payload, dict):
+        logger.warning("Facebook OAuth provider returned an unexpected payload")
+        raise _FacebookProviderError
+    return payload
+
+
+def _facebook_timestamp_is_expired(value, now):
+    if value in (None, "", 0, "0"):
+        return False
+    try:
+        timestamp = int(value)
+    except (TypeError, ValueError):
+        return True
+    return timestamp <= now
+
+
+def _validate_facebook_access_token(access_token):
+    app_id = getattr(settings, "FACEBOOK_APP_ID", "").strip()
+    app_secret = getattr(settings, "FACEBOOK_APP_SECRET", "").strip()
+    if not app_id or not app_secret:
+        raise _FacebookConfigurationError
+
+    debug_payload = _facebook_graph_get(
+        "/debug_token",
+        {
+            "input_token": access_token,
+            "access_token": f"{app_id}|{app_secret}",
+        },
+    )
+    debug_data = debug_payload.get("data")
+    if not isinstance(debug_data, dict):
+        raise _InvalidFacebookTokenError
+
+    if debug_data.get("is_valid") is not True:
+        raise _InvalidFacebookTokenError
+    if str(debug_data.get("app_id", "")) != app_id:
+        raise _InvalidFacebookTokenError
+
+    user_id = debug_data.get("user_id")
+    if not user_id:
+        raise _InvalidFacebookTokenError
+
+    token_type = debug_data.get("type")
+    if token_type and str(token_type).upper() != "USER":
+        raise _InvalidFacebookTokenError
+
+    now = int(time.time())
+    for expiry_field in (
+        "expires_at",
+        "data_access_expiration_time",
+        "data_access_expires_at",
+    ):
+        if _facebook_timestamp_is_expired(debug_data.get(expiry_field), now):
+            raise _InvalidFacebookTokenError
+
+    return str(user_id)
+
 
 class RegisterView(APIView):
     """User registration with email/password"""
@@ -126,22 +240,36 @@ class FacebookAuthView(BaseSocialAuthView):
     """Handle Facebook OAuth login"""
     def post(self, request):
         access_token = request.data.get('access_token')
-        if not access_token:
+        if not isinstance(access_token, str) or not access_token.strip():
             return Response({"detail": "access_token is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        access_token = access_token.strip()
         try:
-            graph_url = f"https://graph.facebook.com/me?fields=id,name,email,picture&access_token={access_token}"
-            fb_res = requests.get(graph_url)
-            fb_data = fb_res.json()
-            
-            if 'error' in fb_data:
-                return Response({"detail": "Invalid Facebook token"}, status=status.HTTP_400_BAD_REQUEST)
-                
+            verified_user_id = _validate_facebook_access_token(access_token)
+            fb_data = _facebook_graph_get(
+                "/me",
+                {
+                    "fields": "id,name,picture",
+                    "access_token": access_token,
+                },
+            )
+
+            if "error" in fb_data:
+                raise _InvalidFacebookTokenError
+
+            facebook_user_id = fb_data.get("id")
+            if not facebook_user_id or str(facebook_user_id) != verified_user_id:
+                raise _InvalidFacebookTokenError
+
+            picture = fb_data.get("picture")
+            picture_data = picture.get("data") if isinstance(picture, dict) else {}
+            avatar_url = picture_data.get("url", "") if isinstance(picture_data, dict) else ""
+            facebook_user_id = str(facebook_user_id)
             serializer = SocialAuthSerializer(data={
-                'email': fb_data.get('email', f"{fb_data.get('id')}@facebook.com"),
+                'email': fb_data.get('email') or f"{facebook_user_id}@facebook.com",
                 'full_name': fb_data.get('name', ''),
-                'provider_id': fb_data.get('id'),
-                'avatar_url': fb_data.get('picture', {}).get('data', {}).get('url', ''),
+                'provider_id': facebook_user_id,
+                'avatar_url': avatar_url,
             })
             if serializer.is_valid():
                 user = serializer.save(provider='facebook')
@@ -152,8 +280,21 @@ class FacebookAuthView(BaseSocialAuthView):
                     'user': UserSerializer(user).data
                 }, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except _FacebookConfigurationError:
+            return Response(
+                {"detail": "Facebook login is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except _InvalidFacebookTokenError:
+            return Response(
+                {"detail": "Invalid Facebook token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except _FacebookProviderError:
+            return Response(
+                {"detail": "Facebook login is temporarily unavailable."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
 class PasswordResetRequestView(APIView):
     """Request password reset link"""
@@ -299,12 +440,11 @@ class AuthorFollowToggleView(APIView):
         
         if created:
             # New follow
-            Author.objects.filter(pk=pk).update(follower_count=F('follower_count') + 1)
+            # AuthorFollow signals are the single owner of follower_count.
             return Response({"detail": "Successfully followed the author."}, status=status.HTTP_200_OK)
         else:
             # Unfollow
             follow_record.delete()
-            Author.objects.filter(pk=pk).update(follower_count=F('follower_count') - 1)
             return Response({"detail": "Successfully unfollowed the author."}, status=status.HTTP_200_OK)
 
 

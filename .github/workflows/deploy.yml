@@ -43,6 +43,7 @@ jobs:
               --restart unless-stopped \
               --memory 400m \
               -p 8000:8000 \
+              -e DJANGO_ENV=production \
               -e DJANGO_SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
               -e DJANGO_DEBUG=false \
               -e DJANGO_ALLOWED_HOSTS="${{ secrets.DJANGO_ALLOWED_HOSTS }}" \
