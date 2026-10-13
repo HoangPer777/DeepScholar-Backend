@@ -1,11 +1,14 @@
 import os
+import uuid
 import requests
+from django.utils import timezone
+from django.db import transaction
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from apps.core.permissions import IsAuthor, IsInternalService
-from .models import Article
+from .models import Article, PdfProcessingJob
 from .pdf_jobs import PdfJobConflict, admit_pdf_job, apply_pdf_callback, mark_pdf_job_running
 
 
@@ -175,10 +178,93 @@ def pdf_pipeline_callback(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAuthor])
 def pdf_pipeline_status(request):
-    """Return a PDF job status after verifying the requesting author's ownership."""
+    """Return durable PDF status after authorizing from the Backend ledger."""
     task_id = (request.query_params.get('task_id') or '').strip()
     if not task_id:
         return Response({'error': 'task_id is required'}, status=400)
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except (ValueError, TypeError, AttributeError):
+        return Response(
+            {'detail': 'PDF task not found or expired', 'error_code': 'pdf_job_not_found_or_expired'},
+            status=404,
+        )
+
+    try:
+        job = PdfProcessingJob.objects.select_related('article').get(task_id=task_uuid)
+    except PdfProcessingJob.DoesNotExist:
+        return Response(
+            {'detail': 'PDF task not found or expired', 'error_code': 'pdf_job_not_found_or_expired'},
+            status=404,
+        )
+
+    article = job.article
+    if not article.is_active or not _can_process_article(request.user, article):
+        return Response(
+            {'detail': 'PDF task not found or expired', 'error_code': 'pdf_job_not_found_or_expired'},
+            status=404,
+        )
+
+    active_statuses = [
+        PdfProcessingJob.Status.QUEUED,
+        PdfProcessingJob.Status.RUNNING,
+        PdfProcessingJob.Status.ARTICLE_SAVED,
+        PdfProcessingJob.Status.EMBEDDING,
+    ]
+    now = timezone.now()
+    if job.status in active_statuses and job.deadline_at <= now:
+        PdfProcessingJob.objects.filter(
+            task_id=job.task_id,
+            status__in=active_statuses,
+            deadline_at__lte=now,
+        ).update(
+            status=PdfProcessingJob.Status.FAILED,
+            error_code='pdf_job_timeout',
+            retryable=False,
+        )
+        job.refresh_from_db()
+
+    def fail_active_job(error_code, retryable=False, fence_worker=False):
+        with transaction.atomic():
+            locked_article = Article.objects.select_for_update().get(pk=article.pk)
+            locked_job = PdfProcessingJob.objects.select_for_update().get(task_id=job.task_id)
+            if locked_job.status in active_statuses:
+                if fence_worker:
+                    locked_article.pdf_generation_deadline = timezone.now()
+                    locked_article.save(update_fields=['pdf_generation_deadline'])
+                locked_job.status = PdfProcessingJob.Status.FAILED
+                locked_job.error_code = str(error_code or 'pdf_processing_failed')[:80]
+                locked_job.retryable = bool(retryable)
+                locked_job.save(update_fields=['status', 'error_code', 'retryable', 'updated_at'])
+            return locked_job
+
+    def ledger_payload(status, *, progress=None):
+        payload = {
+            'status': status,
+            'task_id': str(job.task_id),
+            'slug': article.slug,
+            'article_id': article.pk,
+            'generation': job.generation,
+            'content_revision': job.content_revision,
+            'article_saved': job.article_saved,
+            'embeddings_saved': job.embeddings_saved,
+        }
+        if progress is not None:
+            payload['progress'] = progress
+        if status == 'failed':
+            payload.update({
+                'error_code': job.error_code or 'pdf_processing_failed',
+                'message': 'PDF processing failed. The article may already be available.'
+                    if job.article_saved else 'PDF processing failed. Please try again.',
+                'retryable': bool(job.retryable),
+            })
+        return payload
+
+    if job.status == PdfProcessingJob.Status.COMPLETED:
+        return Response(ledger_payload('completed'), status=200)
+    if job.status == PdfProcessingJob.Status.FAILED:
+        return Response(ledger_payload('failed'), status=200)
 
     try:
         ai_response = None
@@ -200,23 +286,56 @@ def pdf_pipeline_status(request):
 
         data = _safe_json(ai_response)
         if ai_response.status_code == 404:
-            return Response({'detail': 'PDF task not found or expired.'}, status=404)
+            job = fail_active_job('pdf_job_interrupted', fence_worker=True)
+            final_status = 'completed' if job.status == PdfProcessingJob.Status.COMPLETED else 'failed'
+            return Response(ledger_payload(final_status), status=200)
         if not ai_response.ok:
             return Response(data, status=ai_response.status_code)
 
+        expected_identity = {
+            'kind': 'pdf',
+            'task_id': str(job.task_id),
+            'article_id': article.pk,
+            'generation': job.generation,
+            'content_revision': job.content_revision,
+        }
         try:
-            article_id = int(data.get('article_id'))
-            article = Article.objects.prefetch_related('authors').get(
-                id=article_id,
-                is_active=True,
+            matches = all(data.get(key) == value for key, value in expected_identity.items())
+        except AttributeError:
+            matches = False
+        if not matches:
+            return Response({'error': 'AI Service returned a mismatched PDF job.'}, status=502)
+
+        job.refresh_from_db()
+        if job.status == PdfProcessingJob.Status.COMPLETED:
+            return Response(ledger_payload('completed'), status=200)
+        if job.status == PdfProcessingJob.Status.FAILED:
+            return Response(ledger_payload('failed'), status=200)
+
+        ai_status = data.get('status')
+        if ai_status == 'failed':
+            job = fail_active_job(
+                data.get('error_code'),
+                retryable=bool(data.get('retryable', False)),
             )
-        except (TypeError, ValueError, Article.DoesNotExist):
-            return Response({'detail': 'PDF task not found or expired.'}, status=404)
+            final_status = 'completed' if job.status == PdfProcessingJob.Status.COMPLETED else 'failed'
+            return Response(ledger_payload(final_status, progress=data.get('progress')), status=200)
+        if ai_status == 'completed' and job.status != PdfProcessingJob.Status.COMPLETED:
+            job = fail_active_job('pdf_completion_receipt_missing')
+            final_status = 'completed' if job.status == PdfProcessingJob.Status.COMPLETED else 'failed'
+            return Response(ledger_payload(final_status), status=200)
+        if ai_status not in {'queued', 'running', 'completed', 'failed'}:
+            return Response({'error': 'AI Service returned an invalid PDF job state.'}, status=502)
 
-        if not _can_process_article(request.user, article):
-            return Response({'detail': 'PDF task not found or expired.'}, status=404)
+        if ai_status == 'running' and job.status == PdfProcessingJob.Status.QUEUED:
+            PdfProcessingJob.objects.filter(
+                task_id=job.task_id,
+                status=PdfProcessingJob.Status.QUEUED,
+            ).update(status=PdfProcessingJob.Status.RUNNING)
+            job.refresh_from_db()
 
-        return Response(data, status=ai_response.status_code)
+        status_value = 'queued' if job.status == PdfProcessingJob.Status.QUEUED else 'running'
+        return Response(ledger_payload(status_value, progress=data.get('progress')), status=200)
     except requests.exceptions.Timeout:
         return Response({'error': 'AI Service status check timed out.'}, status=504)
     except requests.exceptions.ConnectionError:
