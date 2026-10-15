@@ -6,11 +6,52 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+PRODUCTION_ENV = "production"
+SECRET_KEY_MIN_LENGTH = 50
+_INSECURE_SECRET_KEY_VALUES = frozenset(
+    {
+        "change-me",
+        "change_me",
+        "changeme",
+        "django-insecure",
+        "your-secret-key-change-in-production",
+        "your-secret-key-here",
+    }
+)
+
+
+def validate_production_settings(*, environment, debug, secret_key):
+    """Fail closed when the production runtime uses unsafe settings."""
+    if environment != PRODUCTION_ENV:
+        return
+
+    if debug:
+        raise RuntimeError("DJANGO_DEBUG must be false in production")
+
+    normalized_secret_key = (secret_key or "").strip().lower()
+    if (
+        len(normalized_secret_key) < SECRET_KEY_MIN_LENGTH
+        or normalized_secret_key in _INSECURE_SECRET_KEY_VALUES
+        or normalized_secret_key.startswith("django-insecure-")
+        or normalized_secret_key.startswith("your-secret-key")
+    ):
+        raise RuntimeError(
+            "DJANGO_SECRET_KEY must be a non-placeholder value of at least "
+            f"{SECRET_KEY_MIN_LENGTH} characters in production"
+        )
+
+
+DJANGO_ENV = os.getenv("DJANGO_ENV", "development").strip().lower()
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY is required")
 
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
+validate_production_settings(
+    environment=DJANGO_ENV,
+    debug=DEBUG,
+    secret_key=SECRET_KEY,
+)
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()] + ['host.docker.internal', 'localhost', '127.0.0.1']
 
 INSTALLED_APPS = [
@@ -118,5 +159,11 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@deepscholar.local"
 
 # Google OAuth
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+
+# Facebook OAuth (server-side only)
+FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID", "").strip()
+FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "").strip()
+FACEBOOK_GRAPH_API_VERSION = os.getenv("FACEBOOK_GRAPH_API_VERSION", "").strip().strip("/")
+FACEBOOK_GRAPH_TIMEOUT_SECONDS = float(os.getenv("FACEBOOK_GRAPH_TIMEOUT_SECONDS", "5"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

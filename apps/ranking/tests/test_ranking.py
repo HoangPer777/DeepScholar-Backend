@@ -6,7 +6,11 @@ from rest_framework.test import APIClient
 
 from apps.articles.models import Article, ArticleAuthor
 from apps.interactions.models import Comment, Like
-from apps.ranking.services import get_author_ranking_metrics, recalculate_author_score
+from apps.ranking.services import (
+    get_author_ranking_metrics,
+    recalculate_author_score,
+    recalculate_authors,
+)
 from apps.users.models import Author, User
 
 
@@ -50,6 +54,10 @@ class RankingServiceTests(RankingFixtureMixin, TestCase):
         self.assertEqual(metrics.like_count, 1)
         self.assertEqual(metrics.commenter_count, 1)
         self.assertEqual(recalculate_author_score(author), 18)
+        author.refresh_from_db()
+        self.assertEqual(author.article_count, 1)
+        self.assertEqual(author.like_count, 1)
+        self.assertEqual(author.commenter_count, 1)
 
     def test_each_coauthor_receives_score_and_all_coauthor_activity_is_excluded(self):
         first = self.make_author("first")
@@ -81,6 +89,7 @@ class RankingApiTests(RankingFixtureMixin, TestCase):
         for index, author in enumerate(authors):
             for article_index in range(index + 1):
                 self.make_article(f"paper-{index}-{article_index}", author)
+        recalculate_authors([author.id for author in authors])
 
         response = self.client.get("/api/v1/authors/ranking/?page_size=1&page=2")
 
@@ -98,6 +107,7 @@ class RankingApiTests(RankingFixtureMixin, TestCase):
         second = self.make_author("same-second")
         self.make_article("same-first-paper", first)
         self.make_article("same-second-paper", second)
+        recalculate_authors([first.id, second.id])
 
         response = self.client.get(
             "/api/v1/authors/ranking/?search=same&page_size=1"
@@ -114,6 +124,7 @@ class RankingApiTests(RankingFixtureMixin, TestCase):
         call_command("recalculate_author_rankings", author_id=author.id, stdout=output)
         author.refresh_from_db()
         self.assertEqual(author.total_score, 10)
+        self.assertEqual(author.article_count, 1)
         self.assertIn("Processed 1 author", output.getvalue())
 
 

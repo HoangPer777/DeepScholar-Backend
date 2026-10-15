@@ -102,7 +102,15 @@ def get_author_ranking_metrics(author: Author) -> AuthorRankingMetrics:
 
 def recalculate_author_score(author: Author) -> int:
     metrics = get_author_ranking_metrics(author)
-    Author.objects.filter(pk=author.pk).update(total_score=metrics.total_score)
+    Author.objects.filter(pk=author.pk).update(
+        article_count=metrics.article_count,
+        like_count=metrics.like_count,
+        commenter_count=metrics.commenter_count,
+        total_score=metrics.total_score,
+    )
+    author.article_count = metrics.article_count
+    author.like_count = metrics.like_count
+    author.commenter_count = metrics.commenter_count
     author.total_score = metrics.total_score
     return metrics.total_score
 
@@ -112,9 +120,20 @@ def recalculate_authors(author_ids):
     metrics_by_author = calculate_ranking_metrics(author_ids)
     authors = list(Author.objects.filter(pk__in=author_ids))
     for author in authors:
-        author.total_score = metrics_by_author.get(
-            author.id, AuthorRankingMetrics()
-        ).total_score
+        metrics = metrics_by_author.get(author.id, AuthorRankingMetrics())
+        author.article_count = metrics.article_count
+        author.like_count = metrics.like_count
+        author.commenter_count = metrics.commenter_count
+        author.total_score = metrics.total_score
     with transaction.atomic():
-        Author.objects.bulk_update(authors, ["total_score"], batch_size=500)
+        Author.objects.bulk_update(
+            authors,
+            [
+                "article_count",
+                "like_count",
+                "commenter_count",
+                "total_score",
+            ],
+            batch_size=500,
+        )
     return metrics_by_author

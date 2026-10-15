@@ -2,6 +2,7 @@ import os
 import uuid
 import logging
 from django.db.models import F
+from django.db import transaction
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -10,11 +11,13 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.pagination import PageNumberPagination
-from .models import Article
+from .models import Article, PdfProcessingJob
 from .serializers import ArticleListSerializer, ArticleDetailSerializer, ArticleCreateUpdateSerializer
 from apps.core.permissions import IsAuthor, IsInternalService
 
 logger = logging.getLogger(__name__)
+
+MAX_PDF_SIZE_BYTES = 25 * 1024 * 1024
 
 
 class ArticlePagination(PageNumberPagination):
@@ -86,15 +89,41 @@ class ArticleViewSet(viewsets.ModelViewSet):
             return
         raise PermissionDenied("You do not have permission to modify this article.")
 
+    def _advance_article_revision_if_pdf_fields_changed(self, article_id, request):
+        if not ({"title", "abstract", "content", "pdf_url"} & set(request.data.keys())):
+            return
+        Article.objects.filter(pk=article_id).update(content_revision=F("content_revision") + 1)
+        PdfProcessingJob.objects.filter(
+            article_id=article_id,
+            status__in=[
+                PdfProcessingJob.Status.QUEUED,
+                PdfProcessingJob.Status.RUNNING,
+                PdfProcessingJob.Status.ARTICLE_SAVED,
+                PdfProcessingJob.Status.EMBEDDING,
+            ],
+        ).update(
+            status=PdfProcessingJob.Status.FAILED,
+            error_code="article_revision_changed",
+            retryable=False,
+        )
+
     def update(self, request, *args, **kwargs):
         article = self.get_object()
+        if self._is_internal_service(request):
+            return Response(
+                {"detail": "Internal PDF updates must use the fenced PDF callback."},
+                status=status.HTTP_410_GONE,
+            )
         self._enforce_article_manage_permission(request, article)
-        return super().update(request, *args, **kwargs)
+        with transaction.atomic():
+            Article.objects.select_for_update().get(pk=article.pk)
+            response = super().update(request, *args, **kwargs)
+            self._advance_article_revision_if_pdf_fields_changed(article.pk, request)
+            return response
 
     def partial_update(self, request, *args, **kwargs):
-        article = self.get_object()
-        self._enforce_article_manage_permission(request, article)
-        return super().partial_update(request, *args, **kwargs)
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -145,6 +174,33 @@ class ArticleViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        raw_file_size = request.data.get('file_size')
+        if isinstance(raw_file_size, bool) or raw_file_size in (None, ''):
+            return Response(
+                {"error": "file_size is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            file_size = int(raw_file_size)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "file_size must be an integer number of bytes"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if file_size <= 0:
+            return Response(
+                {"error": "file_size must be greater than zero"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if file_size > MAX_PDF_SIZE_BYTES:
+            return Response(
+                {
+                    "error": "PDF file exceeds the 25 MiB limit",
+                    "max_file_size_bytes": MAX_PDF_SIZE_BYTES,
+                },
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
         # Unique object key to avoid collisions
         file_path = f"articles/{uuid.uuid4()}_{file_name}"
 
@@ -165,6 +221,7 @@ class ArticleViewSet(viewsets.ModelViewSet):
                     'Bucket': bucket_name,
                     'Key': file_path,
                     'ContentType': 'application/pdf',
+                    'ContentLength': file_size,
                 },
                 ExpiresIn=3600  # 1 hour
             )
@@ -182,6 +239,7 @@ class ArticleViewSet(viewsets.ModelViewSet):
                 "presigned_url": presigned_url,
                 "file_path": file_path,
                 "public_url": public_url,
+                "max_file_size_bytes": MAX_PDF_SIZE_BYTES,
             })
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -69,6 +69,9 @@ class Author(models.Model):
     author_name = models.CharField(max_length=255, blank=True, null=True)
     affiliation = models.CharField(max_length=255, blank=True, null=True)
     bio = models.TextField(blank=True, null=True)
+    article_count = models.PositiveIntegerField(default=0)
+    like_count = models.PositiveIntegerField(default=0)
+    commenter_count = models.PositiveIntegerField(default=0)
     total_score = models.IntegerField(default=0)  # Ranking score
     follower_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
